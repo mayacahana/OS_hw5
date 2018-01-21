@@ -8,6 +8,10 @@
 #include <string.h>
 #include <sys/types.h>
 #include <time.h>
+#include <pthread.h>
+#include <signal.h>
+#include <stdbool.h>
+#include <sys/wait.h>
 #include <assert.h>
 
 #define NUM_PRINTABLE 95
@@ -31,7 +35,7 @@ void signal_handler(int signum) {
     }
     rc = pthread_mutex_lock(&my_mutex);
     if (rc != 0) {
-        printf("Error in pthread_mutex_lock: %s \n", atrerror(rc));
+        printf("Error in pthread_mutex_lock: %s \n", strerror(rc));
         pthread_exit(NULL);
     }
     // wait to all threads to finish
@@ -51,7 +55,7 @@ void signal_handler(int signum) {
     for (i=0; i < NUM_PRINTABLE; i++) {
         printf("char '%c' : %u times", i+32, pcc_total[i]);
     }
-    rc = pthread_cond_destroy(&my_mutex);
+    rc = pthread_cond_destroy(&cv);
     if (rc) {
         printf("Error in pthread mutex destroy %s\n", strerror(rc));
         pthread_exit(NULL);
@@ -74,11 +78,11 @@ void* thread_work(void* p_client_sock) {
     // init this threads pcc_total
     int this_pcc_total[NUM_PRINTABLE];
     memset(this_pcc_total, 0 , NUM_PRINTABLE);
-    int client_fd = (int) p_client_sock;
+    int client_fd = (intptr_t) p_client_sock;
     // first read the header (length)
     unsigned cnt;
     unsigned incoming_header = sizeof(unsigned);
-    unsigned total_read;
+    unsigned total_read = 0;
     while (total_read < incoming_header) {
         int bytes_read = read(client_fd,&cnt + total_read, incoming_header - total_read);
         if (bytes_read < 0){
@@ -93,7 +97,7 @@ void* thread_work(void* p_client_sock) {
         printf("Error: calloc msg failed %s\n", strerror(errno));
         exit(-1);
     }
-    int total_read = 0;
+    total_read = 0;
     int printable_chars =0;
     while (total_read < cnt) {
         int bytes_read = read(client_fd, msg+total_read, cnt-total_read);
@@ -160,7 +164,7 @@ int main(int argc, char *argv[]) {
     }
     int port_server = atoi(argv[1]);
     // create sigint handler
-    int running_threads = 0;
+    //int running_threads = 0;
     total_pcc_chars = 0;
     struct sigaction new_interrupt;
     memset(&new_interrupt, 0, sizeof(new_interrupt));
@@ -200,7 +204,7 @@ int main(int argc, char *argv[]) {
         printf("Error: listen function failed %s\n", strerror(errno));
         exit(-1);
     }
-    int client_sock;
+    int client_sock = -1;
     while (1) {
         // accept new connection 
         client_sock = accept(listen_socket, NULL, NULL);
@@ -210,7 +214,7 @@ int main(int argc, char *argv[]) {
         }
         pthread_t t;
         // create new thread
-        int cpthread = pthread_create(&t, NULL, thread_work, (void *)client_sock);
+        int cpthread = pthread_create(&t, NULL, thread_work, (void *) (intptr_t)client_sock);
         if (cpthread) {
             printf("\n Error: in pthread_create %s", strerror(errno));
             pthread_exit(NULL);

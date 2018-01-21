@@ -1,5 +1,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <netdb.h>
 #include <stdio.h>
@@ -10,12 +12,14 @@
 #include <arpa/inet.h>
 #include <errno.h>
 
+
 #define PCC_INDEX (index)(index-32)
 #define BACKLOG 10
 #define NUM_PRINTABLE 95
 #define RANDON_GENERATOR "/dev/urandom"
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define CHUNK_SIZE 1024
+
 // credit to http://www.binarytides.com/hostname-to-ip-address-c-sockets-linux/
 int hostname_to_ip(char* hostname, char* ip) {
     struct hostent *he;
@@ -76,7 +80,7 @@ int main(int argc, char *argv[]) {
 
     }
     // create new listen socket
-    if (sockfd = socket(AF_INET, SOCK_STREAM, 0) < 0){
+    if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
         printf("\n Error: %s", strerror(errno));
         exit(-1);
     }
@@ -87,7 +91,7 @@ int main(int argc, char *argv[]) {
     }
 
     // read from file
-    int fd = open(byte_generator, O_RDONLY);
+    int fd = open(byte_generator, O_RDONLY, 0777);
     if (fd < 0) {
         printf("\n Error: %s", strerror(errno));
         exit(-1);
@@ -105,7 +109,7 @@ int main(int argc, char *argv[]) {
     }
     // close
     if (close(fd) < 0) {
-        printf("\n Error: %s", sterror(errno));
+        printf("\n Error: %s", strerror(errno));
         exit(-1);
     }
 
@@ -126,7 +130,6 @@ int main(int argc, char *argv[]) {
     // read from server
     unsigned cnt_printable;
     unsigned incoming_message = sizeof(unsigned);
-    unsigned total_read;
     while (total_read < incoming_message) {
         int bytes_read = read(sockfd,&cnt_printable + total_read, incoming_message - total_read);
         if (bytes_read < 0){
