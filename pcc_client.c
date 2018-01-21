@@ -11,7 +11,8 @@
 #include <errno.h>
 #include <arpa/inet.h>
 #include <errno.h>
-
+#include <arpa/inet.h>
+#include <stdbool.h>
 
 #define PCC_INDEX (index)(index-32)
 #define BACKLOG 10
@@ -20,26 +21,12 @@
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define CHUNK_SIZE 1024
 
-// credit to http://www.binarytides.com/hostname-to-ip-address-c-sockets-linux/
-int hostname_to_ip(char* hostname, char* ip) {
-    struct hostent *he;
-    struct in_addr **addr_list;
-    int i;
-         
-    if ((he = gethostbyname(hostname)) == NULL) {
-        // get the host info
-        herror("gethostbyname");
-        return 1;
-    }
-
-    addr_list = (struct in_addr **) he->h_addr_list;
-
-    for(i = 0; addr_list[i] != NULL; i++) {
-        //Return the first one;
-        strcpy(ip , inet_ntoa(*addr_list[i]) );
-        return 0;
-    }
-    return 1;
+// credit to https://stackoverflow.com/questions/791982/determine-if-a-string-is-a-valid-ip-address-in-c
+bool isValidIpAddress(char *ipAddress)
+{
+    struct sockaddr_in sa;
+    int result = inet_pton(AF_INET, ipAddress, &(sa.sin_addr));
+    return result != 0;
 }
 
 int read_file(int fd, int length, char* buffer) {
@@ -65,30 +52,54 @@ int main(int argc, char *argv[]) {
     char* hostname = argv[1];
     unsigned short port = (unsigned short) atoi(argv[2]);
     unsigned int length = atoi(argv[3]);
-    int sockfd;
+    int sockfd = -1;
     unsigned total_read = 0;
     char* byte_generator = RANDON_GENERATOR;
     struct sockaddr_in server_addr;
 
-	memset(&server_addr, '0', sizeof(server_addr));
-	server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port); // for endiannes
+	
     // covert internet dot address to network address
-    int convert_addr = hostname_to_ip(hostname, &server_addr.sin_addr);
-    if (convert_addr) {
-        //there was a problem with the hostname to ip
+    if (isValidIpAddress(hostname) == true) {
+        memset(&server_addr, '0', sizeof(server_addr));
+	    server_addr.sin_family = AF_INET;
+        server_addr.sin_port = htons(port); // for endiannes
+        char hostname_cpy[32];
+        strcpy(hostname_cpy, hostname);
+        server_addr.sin_addr.s_addr = inet_addr(hostname_cpy);
+        // create new listen socket
+        if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
+            printf("\n Error: %s", strerror(errno));
+            exit(-1);
+        }
+        // connect
+        if (connect(sockfd, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) {
+            printf("\n Error: %s", strerror(errno));
+            exit(-1);
+        }
+    } else {
+        struct addrinfo dns, *info_ptr;
+        memset(&dns, 0, sizeof(dns));
+        dns.ai_family = AF_UNSPEC;
+        dns.ai_protocol = 0;
+        dns.ai_flags = 0;
+        int tmp = -1;
+        if ((tmp = getaddrinfo(argv[1], argv[2], &dns, &info_ptr)) == 1) {
+            printf("\n Error: %s", strerror(errno));
+            exit(-1); 
+        }
+        // create new listen socket
+        if ((sockfd = socket(info_ptr->ai_family, info_ptr->ai_socktype, info_ptr->ai_protocol)) < 0){
+            printf("\n Error: %s", strerror(errno));
+            exit(-1);
+        }
+        // connect
+        if (connect(sockfd, (struct sockaddr *)(info_ptr->ai_addr), info_ptr->ai_addrlen) < 0) {
+            printf("\n Error: %s", strerror(errno));
+            exit(-1);
+        }
 
     }
-    // create new listen socket
-    if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
-        printf("\n Error: %s", strerror(errno));
-        exit(-1);
-    }
-    // connect
-    if (connect(sockfd, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) {
-        printf("\n Error: %s", strerror(errno));
-        exit(-1);
-    }
+    
 
     // read from file
     int fd = open(byte_generator, O_RDONLY, 0777);
