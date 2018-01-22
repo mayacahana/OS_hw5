@@ -14,10 +14,14 @@
 #include <arpa/inet.h>
 #include <stdbool.h>
 
+bool isValidIpAddress(char *ipAddress);
+int read_all(int fd, void* buffer, size_t bytes_to_read);
+int write_all(int fd, void* buffer, size_t bytes_to_write);
+
 #define PCC_INDEX (index)(index-32)
 #define BACKLOG 10
 #define NUM_PRINTABLE 95
-#define RANDON_GENERATOR "/dev/urandom"
+#define RANDOM_GENERATOR "/dev/urandom"
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define CHUNK_SIZE 1024
 
@@ -29,32 +33,49 @@ bool isValidIpAddress(char *ipAddress)
     return result != 0;
 }
 
-int read_file(int fd, int length, char* buffer) {
-    int total = 0, num_read;
-    while (total < length) {
-        num_read = read(fd, buffer+total, CHUNK_SIZE);
-        if (num_read < 0) {
-            perror("Error with read");
+int read_all(int fd, void* buffer, size_t bytes_to_read){ 
+    int total_read = 0;
+    while (total_read < bytes_to_read) {
+        ssize_t bytes_read = read(fd ,buffer + total_read, bytes_to_read - total_read);
+        if (bytes_read < 0){
+            printf("\n Error: %s", strerror(errno));
             exit(-1);
         }
-        if (num_read == 0) { //eof
-            return total;
+        if (bytes_read == 0) {
+            return total_read;
         }
-        total+=num_read;
+        total_read += bytes_read;
     }
-    return total;
+    return total_read;
 }
+
+int write_all(int fd, void* buffer, size_t bytes_to_write) {
+    int total_written = 0;
+    while (total_written < bytes_to_write) {
+        ssize_t bytes_write = write(fd, buffer+total_written, bytes_to_write - total_written);
+        if (bytes_write < 0) {
+            printf("\n Error: %s", strerror(errno));
+            exit(-1);
+        }
+        if (bytes_write == 0) {
+            return total_written;
+        }
+        total_written += bytes_write;
+    }
+    return total_written;
+}
+
 int main(int argc, char *argv[]) {
     if (argc != 4) {
-
+        printf("\n Error: not enough args");
+        exit(-1);
     }
     // create a TCP connection 
     char* hostname = argv[1];
     unsigned short port = (unsigned short) atoi(argv[2]);
     unsigned int length = atoi(argv[3]);
     int sockfd = -1;
-    unsigned total_read = 0;
-    char* byte_generator = RANDON_GENERATOR;
+    //char* byte_generator = RANDON_GENERATOR;
     struct sockaddr_in server_addr;
 
 	
@@ -84,73 +105,66 @@ int main(int argc, char *argv[]) {
         dns.ai_flags = 0;
         int tmp = -1;
         if ((tmp = getaddrinfo(argv[1], argv[2], &dns, &info_ptr)) == 1) {
-            printf("\n Error: %s", strerror(errno));
+            printf("Error: %s \n", strerror(errno));
             exit(-1); 
         }
         // create new listen socket
         if ((sockfd = socket(info_ptr->ai_family, info_ptr->ai_socktype, info_ptr->ai_protocol)) < 0){
-            printf("\n Error: %s", strerror(errno));
+        printf("Error: %s \n", strerror(errno));
             exit(-1);
         }
         // connect
         if (connect(sockfd, (struct sockaddr *)(info_ptr->ai_addr), info_ptr->ai_addrlen) < 0) {
-            printf("\n Error: %s", strerror(errno));
+        printf("Error: %s \n", strerror(errno));
             exit(-1);
         }
 
     }
-    
-
     // read from file
-    int fd = open(byte_generator, O_RDONLY, 0777);
+    int fd = open(RANDOM_GENERATOR, O_RDONLY, 0777);
     if (fd < 0) {
-        printf("\n Error: %s", strerror(errno));
+        printf("Error: %s \n", strerror(errno));
         exit(-1);
     }
-    // read in 
-    char* buffer = (char *) calloc(length, sizeof(char));
-    if (!buffer) {
-        printf("\n Error: %s", strerror(errno));
+    // write length of msg
+    if (write_all(sockfd, &length, sizeof(unsigned int)) < sizeof(unsigned int)) {
+        printf("Error: failed to write to sockfd\n");
         exit(-1);
     }
-    total_read = read_file(fd, length, buffer);
-    if (total_read != length) {
-        printf("\n Error: total read is diff from length %s", strerror(errno));
-        exit(-1);
-    }
-    // close
-    if (close(fd) < 0) {
-        printf("\n Error: %s", strerror(errno));
-        exit(-1);
+    //
+    int bytes_to_read = MIN(CHUNK_SIZE, length);
+    int cnt = 0, num_read = -1;
+    char* buffer[CHUNK_SIZE];
+
+    while (cnt < length) {
+        if ((num_read = read_all(fd, buffer, bytes_to_read)) < 0) {
+            printf("Error: failed to read from random file %s \n", strerror(errno));
+            exit(-1);
+        }
+        cnt+=num_read;
+        if (write_all(sockfd, buffer, num_read) < num_read) {
+            printf("Error: fail to send random to server %s \n", strerror(errno));
+            exit(-1);
+        }
+        bytes_to_read = MIN(CHUNK_SIZE, length - cnt);
+        memset(buffer, 0, CHUNK_SIZE);
     }
 
-    // now - write to server :) 
-    unsigned long header_msg_len = sizeof(unsigned int);
-    unsigned long header_sent = 0;
-    unsigned int header_length = length;
-    while (header_sent < header_msg_len) {
-        int bytes_sent = write(sockfd, &header_length + header_sent, header_msg_len - header_sent);
-        if (bytes_sent < 0) {
-            printf("\n Error: %s", strerror(errno));
-            exit(-1);
-        }
-        header_sent += bytes_sent;
-    }
-    printf("DONE WRITING HEADER");
-    free (buffer);
+
+    // get printable chars
     // read from server
-    unsigned cnt_printable;
-    unsigned incoming_message = sizeof(unsigned);
-    while (total_read < incoming_message) {
-        int bytes_read = read(sockfd,&cnt_printable + total_read, incoming_message - total_read);
-        if (bytes_read < 0){
-            printf("\n Error: %s", strerror(errno));
-            exit(-1);
-        }
-        total_read += bytes_read;
+    unsigned int cnt_printable = 0;
+    //unsigned incoming_message = sizeof(unsigned int);
+    if ((num_read = read_all(sockfd, &cnt_printable, sizeof(unsigned int))) < sizeof(unsigned int)) {
+        printf("Error: fail to send random to server %s \n", strerror(errno));
+        exit(-1);
     }
     printf("# of printable characters: %u\n", cnt_printable);
     // close socket
+    if (close(fd) < 0){
+        printf("\n Error: %s", strerror(errno));
+        exit(-1);
+    }
     if (close(sockfd) < 0){
         printf("\n Error: %s", strerror(errno));
         exit(-1);

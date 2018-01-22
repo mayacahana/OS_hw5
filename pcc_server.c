@@ -16,6 +16,9 @@
 
 #define NUM_PRINTABLE 95
 
+void* thread_work(void* p_client_sock);
+void signal_handler(int signum);
+
 int listen_socket;
 unsigned pcc_total[NUM_PRINTABLE];
 int total_pcc_chars;
@@ -28,10 +31,6 @@ void signal_handler(int signum) {
     if (close(listen_socket) < 0) {
         printf("Error: %s \n", strerror(errno));
         exit(-1);
-    }
-    if ((rc = pthread_cond_init(&cv, NULL)) != 0) {
-        printf("Error: init pthread cond \n %s", strerror(rc));
-        pthread_exit(NULL);
     }
     rc = pthread_mutex_lock(&my_mutex);
     if (rc != 0) {
@@ -53,9 +52,14 @@ void signal_handler(int signum) {
     }
     int i=0;
     for (i=0; i < NUM_PRINTABLE; i++) {
-        printf("char '%c' : %u times", i+32, pcc_total[i]);
+        printf("char '%c' : %u times \n", i+32, pcc_total[i]);
     }
     rc = pthread_cond_destroy(&cv);
+    if (rc) {
+        printf("Error in pthread mutex destroy %s\n", strerror(rc));
+        pthread_exit(NULL);
+    }
+    rc = pthread_mutex_destroy(&my_mutex);
     if (rc) {
         printf("Error in pthread mutex destroy %s\n", strerror(rc));
         pthread_exit(NULL);
@@ -98,7 +102,7 @@ void* thread_work(void* p_client_sock) {
         exit(-1);
     }
     total_read = 0;
-    int printable_chars =0;
+    int printable_chars = 0;
     while (total_read < cnt) {
         int bytes_read = read(client_fd, msg+total_read, cnt-total_read);
         if (bytes_read < 0){
@@ -117,9 +121,9 @@ void* thread_work(void* p_client_sock) {
     // write back to client the result
     // int num_written = 0;
     int total_written = 0;
-    int num_towrite = sizeof(unsigned);
+    int num_towrite = sizeof(unsigned int);
     while (total_written < num_towrite) {
-        int num_written = write(client_fd, &printable_chars+total_written, num_towrite-total_written);
+        int num_written = write(client_fd, &printable_chars, sizeof(unsigned int));
         if (num_written < 0){
             printf("\n Error: %s", strerror(errno));
             exit(-1);
@@ -181,6 +185,10 @@ int main(int argc, char *argv[]) {
     if ((rc = pthread_mutex_init(&my_mutex, NULL)) != 0) {
         printf("Error in mutex init %s \n", strerror(errno));
         exit(-1);
+    }
+    if ((rc = pthread_cond_init(&cv, NULL)) != 0) {
+        printf("Error: init pthread cond \n %s", strerror(rc));
+        pthread_exit(NULL);
     }
 
     struct sockaddr_in server_addr;
